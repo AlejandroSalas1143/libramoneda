@@ -1,0 +1,42 @@
+# Python bytecode / caches
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+.pytest_cache/
+.mypy_cache/
+
+# Virtualenvs
+venv/
+.venv/
+env/
+.env/
+
+# Build / dist
+build/
+dist/
+*.egg-info/
+
+# Logs / coverage
+*.log
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# IDE/OS
+.vscode/
+.idea/
+*.code-workspace
+.DS_Store
+Thumbs.db
+
+# Secrets / tokens (¡no subir!)
+.env
+.env.*
+token.json
+client_secret.json
+app-copy.py
+gen_token.py
+index.html
