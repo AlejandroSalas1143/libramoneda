@@ -30,8 +30,9 @@ from googleapiclient.http import MediaIoBaseUpload
 # Configuración general
 # =======================
 PRODUCT_CONFIG = {
-    "base_rate_monthly": Decimal("0.0184"),   # 1,84% mensual (sin aval)
-    "total_rate_monthly": Decimal("0.0705"),  # 7,05% mensual (con aval)
+    "base_rate_monthly": Decimal("0.0183"),   # 1,84% mensual (sin aval)
+    "rate_aval_payroll": Decimal("0.0705"),  # 7,05% mensual (con aval) para creditos de libranza
+    "rate_aval_individualorcompany": Decimal("0.0405"), # 4,05% mensual (con aval) para creditos de personas naturales o juridicas
     "iva_rate": Decimal("0.19"),              # 19%
     "round_to": Decimal("1")                  # redondeo a pesos
 }
@@ -101,6 +102,8 @@ class SimulateRequest(BaseModel):
     amount: Decimal = Field(..., gt=Decimal("0"))
     periods: PositiveInt
     start_date: date | None = None
+    tipo_credito: Optional[str] = None   # e.g., "libranza" | "particular" | "consumo"
+    tipo_persona: Optional[str] = None   # e.g., "natural" | "juridica"
 
 class ScheduleRow(BaseModel):
     cuota_no: int
@@ -184,6 +187,8 @@ class DetallesCredito(BaseModel):
     # del front (opcionales): cuota_estimada y tasa
     cuota_estimada: Optional[Decimal] = None
     tasa: Optional[Decimal] = None
+    tipo_credito: Optional[str] = None   # "libranza" o lo que uses en front
+    tipo_persona: Optional[str] = None   # "natural" | "juridica"
 
 
 class SolicitudCredito(BaseModel):
@@ -215,14 +220,17 @@ class SolicitudResponse(BaseModel):
 # =======================
 # Utils de negocio
 # =======================
-def calcular_cuota_mensual(monto: Decimal, plazo: int) -> Decimal:
+def calcular_cuota_mensual(monto: Decimal, plazo: int, tipo_credito: Optional[str] = None, tipo_persona: Optional[str] = None) -> Decimal:
     i0 = PRODUCT_CONFIG["base_rate_monthly"]
-    i1 = PRODUCT_CONFIG["total_rate_monthly"]
+    i1 = seleccionar_tasa_aval(monto, tipo_credito, tipo_persona)
     iva = PRODUCT_CONFIG["iva_rate"]
+
     pay_base = pmt(monto, i0, plazo)
     pay_with_aval = pmt(monto, i1, plazo)
+
     aval_monthly = (pay_with_aval - pay_base).quantize(R)
     iva_aval = (aval_monthly * iva).quantize(R)
+
     return (pay_base + aval_monthly + iva_aval).quantize(R)
 
 def generar_whatsapp_url(telefono: str, id_solicitud: str) -> str:
@@ -231,6 +239,22 @@ def generar_whatsapp_url(telefono: str, id_solicitud: str) -> str:
         n = '57' + n
     msg = "Hola! Quiero continuar con mi solicitud de crédito. Mi ID es: " + id_solicitud
     return f"https://wa.me/{n}?text={msg.replace(' ', '%20')}"
+
+def seleccionar_tasa_aval(monto: Decimal, tipo_credito: Optional[str], tipo_persona: Optional[str]) -> Decimal:
+    """
+    Regla:
+      - Si es libranza => siempre rate_aval_payroll (7,05%), sin importar monto.
+      - Si NO es libranza:
+          - monto > 5'000.000 => rate_aval_individualorcompany (4,05%)
+          - monto <= 5'000.000 => rate_aval_payroll (7,05%)
+    """
+    if (tipo_credito or "").strip().lower() == "libranza":
+        return PRODUCT_CONFIG["rate_aval_payroll"]
+    return (
+        PRODUCT_CONFIG["rate_aval_individualorcompany"]
+        if monto > Decimal("5000000")
+        else PRODUCT_CONFIG["rate_aval_payroll"]
+    )
 
 # =======================
 # Google Auth base
@@ -469,7 +493,7 @@ def simulate(req: SimulateRequest):
     P = req.amount.quantize(R)
     n = req.periods
     i0 = PRODUCT_CONFIG["base_rate_monthly"]
-    i1 = PRODUCT_CONFIG["total_rate_monthly"]
+    i1 = seleccionar_tasa_aval(P, req.tipo_credito, req.tipo_persona)   # ← NUEVO
     iva = PRODUCT_CONFIG["iva_rate"]
     start = req.start_date or date.today()
 
